@@ -31,6 +31,22 @@ namespace Pawns {
 /// to the pawn hash table (performed by calling the probe function) returns a
 /// pointer to an Entry object.
 
+struct PawnAtoms {
+    Score backward      = SCORE_ZERO;
+    Score doubled       = SCORE_ZERO;
+    Score isolated      = SCORE_ZERO;
+    Score weakLever     = SCORE_ZERO;
+    Score weakUnopposed = SCORE_ZERO;
+    Score connected     = SCORE_ZERO;
+};
+
+struct KingAtoms {
+    Score shelterBase = SCORE_ZERO;
+    Score shelterStr = SCORE_ZERO;
+    Score storm = SCORE_ZERO;
+    Score proximity = SCORE_ZERO;
+};
+
 struct Entry {
 
   Score pawn_score(Color c) const { return scores[c]; }
@@ -49,7 +65,10 @@ struct Entry {
   Score do_king_safety(const Position& pos);
 
   template<Color Us>
-  Score evaluate_shelter(const Position& pos, Square ksq);
+  Score evaluate_shelter(const Position& pos, Square ksq, KingAtoms& atoms);
+
+  PawnAtoms atoms[COLOR_NB];
+  KingAtoms kingAtoms[COLOR_NB];
 
   Key key;
   Score scores[COLOR_NB];
