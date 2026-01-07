@@ -86,6 +86,9 @@ namespace {
     e->passedPawns[Us] = 0;
     e->kingSquares[Us] = SQ_NONE;
     e->pawnAttacks[Us] = e->pawnAttacksSpan[Us] = pawn_attacks_bb<Us>(ourPawns);
+    
+    // Reset atoms
+    e->atoms[Us] = Pawns::PawnAtoms();
 
     // Loop through all pawns of the current color and score each pawn
     while ((s = *pl++) != SQ_NONE)
@@ -135,25 +138,38 @@ namespace {
             int v =  Connected[r] * (2 + bool(phalanx) - bool(opposed))
                    + 21 * popcount(support);
 
-            score += make_score(v, v * (r - 2) / 4);
+            Score conn = make_score(v, v * (r - 2) / 4);
+            score += conn;
+            e->atoms[Us].connected += conn;
         }
 
-        else if (!neighbours)
-            score -=   Isolated
-                     + WeakUnopposed * !opposed;
+        else if (!neighbours) {
+            Score iso = Isolated;
+            Score weak = WeakUnopposed * !opposed;
+            score -= (iso + weak);
+            e->atoms[Us].isolated -= iso;
+            e->atoms[Us].weakUnopposed -= weak;
+        }
 
-        else if (backward)
-            score -=   Backward
-                     + WeakUnopposed * !opposed;
+        else if (backward) {
+            Score back = Backward;
+            Score weak = WeakUnopposed * !opposed;
+            score -= (back + weak);
+            e->atoms[Us].backward -= back;
+            e->atoms[Us].weakUnopposed -= weak;
+        }
 
-        if (!support)
-            score -=   Doubled * doubled
-                     + WeakLever * more_than_one(lever);
+        if (!support) {
+            Score dbl = Doubled * doubled;
+            Score leverPen = WeakLever * more_than_one(lever);
+            score -= (dbl + leverPen);
+            e->atoms[Us].doubled -= dbl;
+            e->atoms[Us].weakLever -= leverPen;
+        }
     }
 
     return score;
   }
-
 } // namespace
 
 namespace Pawns {
@@ -164,7 +180,6 @@ namespace Pawns {
 /// have to recompute all when the same pawns configuration occurs again.
 
 Entry* probe(const Position& pos) {
-
   Key key = pos.pawn_key();
   Entry* e = pos.this_thread()->pawnsTable[key];
 
@@ -172,6 +187,11 @@ Entry* probe(const Position& pos) {
       return e;
 
   e->key = key;
+  e->atoms[WHITE] = PawnAtoms();
+  e->atoms[BLACK] = PawnAtoms();
+  e->kingAtoms[WHITE] = KingAtoms();
+  e->kingAtoms[BLACK] = KingAtoms();
+
   e->scores[WHITE] = evaluate<WHITE>(pos, e);
   e->scores[BLACK] = evaluate<BLACK>(pos, e);
 
@@ -183,7 +203,7 @@ Entry* probe(const Position& pos) {
 /// penalty for a king, looking at the king file and the two closest files.
 
 template<Color Us>
-Score Entry::evaluate_shelter(const Position& pos, Square ksq) {
+Score Entry::evaluate_shelter(const Position& pos, Square ksq, KingAtoms& ka) {
 
   constexpr Color Them = (Us == WHITE ? BLACK : WHITE);
 
@@ -191,7 +211,10 @@ Score Entry::evaluate_shelter(const Position& pos, Square ksq) {
   Bitboard ourPawns = b & pos.pieces(Us);
   Bitboard theirPawns = b & pos.pieces(Them);
 
-  Score bonus = make_score(5, 5);
+  // Shelter Base
+  Score base = make_score(5, 5);
+  ka.shelterBase += base;
+  Score bonus = base;
 
   File center = clamp(file_of(ksq), FILE_B, FILE_G);
   for (File f = File(center - 1); f <= File(center + 1); ++f)
@@ -203,20 +226,27 @@ Score Entry::evaluate_shelter(const Position& pos, Square ksq) {
       int theirRank = b ? relative_rank(Us, frontmost_sq(Them, b)) : 0;
 
       File d = map_to_queenside(f);
-      bonus += make_score(ShelterStrength[d][ourRank], 0);
+      
+      // Shelter Strength
+      Score str = make_score(ShelterStrength[d][ourRank], 0);
+      bonus += str;
+      ka.shelterStr += str;
 
-      if (ourRank && (ourRank == theirRank - 1))
-          bonus -= BlockedStorm * int(theirRank == RANK_3);
-      else
-          bonus -= make_score(UnblockedStorm[d][theirRank], 0);
+      if (ourRank && (ourRank == theirRank - 1)) {
+          Score pen = BlockedStorm * int(theirRank == RANK_3);
+          bonus -= pen;
+          ka.storm -= pen;
+      }
+      else {
+          Score pen = make_score(UnblockedStorm[d][theirRank], 0);
+          bonus -= pen;
+          ka.storm -= pen;
+      }
   }
 
   return bonus;
 }
 
-
-/// Entry::do_king_safety() calculates a bonus for king safety. It is called only
-/// when king square changes, which is about 20% of total king_safety() calls.
 
 template<Color Us>
 Score Entry::do_king_safety(const Position& pos) {
@@ -226,15 +256,36 @@ Score Entry::do_king_safety(const Position& pos) {
   castlingRights[Us] = pos.castling_rights(Us);
   auto compare = [](Score a, Score b) { return mg_value(a) < mg_value(b); };
 
-  Score shelter = evaluate_shelter<Us>(pos, ksq);
+  // Reset KingAtoms
+  kingAtoms[Us] = KingAtoms();
 
-  // If we can castle use the bonus after castling if it is bigger
+  // We need to capture the best shelter. 
+  // Since we can't easily "undo" atoms if we swap to a better castling square,
+  // we use temporary atoms and copy the best one.
+  
+  KingAtoms bestAtoms;
+  Score shelter = evaluate_shelter<Us>(pos, ksq, bestAtoms);
 
-  if (pos.can_castle(Us & KING_SIDE))
-      shelter = std::max(shelter, evaluate_shelter<Us>(pos, relative_square(Us, SQ_G1)), compare);
+  if (pos.can_castle(Us & KING_SIDE)) {
+      KingAtoms kTemp;
+      Score sTemp = evaluate_shelter<Us>(pos, relative_square(Us, SQ_G1), kTemp);
+      if (compare(shelter, sTemp)) {
+          shelter = sTemp;
+          bestAtoms = kTemp;
+      }
+  }
 
-  if (pos.can_castle(Us & QUEEN_SIDE))
-      shelter = std::max(shelter, evaluate_shelter<Us>(pos, relative_square(Us, SQ_C1)), compare);
+  if (pos.can_castle(Us & QUEEN_SIDE)) {
+      KingAtoms kTemp;
+      Score sTemp = evaluate_shelter<Us>(pos, relative_square(Us, SQ_C1), kTemp);
+      if (compare(shelter, sTemp)) {
+          shelter = sTemp;
+          bestAtoms = kTemp;
+      }
+  }
+
+  // Copy best atoms to entry
+  kingAtoms[Us] = bestAtoms;
 
   // In endgame we like to bring our king near our closest pawn
   Bitboard pawns = pos.pieces(Us, PAWN);
@@ -244,8 +295,11 @@ Score Entry::do_king_safety(const Position& pos) {
       minPawnDist = 1;
   else while (pawns)
       minPawnDist = std::min(minPawnDist, distance(ksq, pop_lsb(&pawns)));
+  
+  Score prox = make_score(0, 16 * minPawnDist);
+  kingAtoms[Us].proximity -= prox;
 
-  return shelter - make_score(0, 16 * minPawnDist);
+  return shelter - prox;
 }
 
 // Explicit template instantiation
