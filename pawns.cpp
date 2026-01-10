@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 
 #include "bitboard.h"
 #include "pawns.h"
@@ -187,6 +188,8 @@ Entry* probe(const Position& pos) {
       return e;
 
   e->key = key;
+  std::memset(e->atoms, 0, sizeof(e->atoms));
+  std::memset(e->kingAtoms, 0, sizeof(e->kingAtoms));
   e->atoms[WHITE] = PawnAtoms();
   e->atoms[BLACK] = PawnAtoms();
   e->kingAtoms[WHITE] = KingAtoms();

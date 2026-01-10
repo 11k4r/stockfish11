@@ -147,9 +147,9 @@ endif
 
 ### 3.1 Selecting compiler (default = gcc)
 
-CXXFLAGS += -Wall -Wcast-qual -fno-exceptions -std=c++11 $(EXTRACXXFLAGS)
-DEPENDFLAGS += -std=c++11
-LDFLAGS += $(EXTRALDFLAGS)
+CXXFLAGS += -Wall -Wcast-qual -fno-exceptions -std=c++17 $(EXTRACXXFLAGS)
+DEPENDFLAGS += -std=c++17
+LDFLAGS += -static $(EXTRALDFLAGS)
 
 ifeq ($(COMP),)
 	COMP=gcc
@@ -163,15 +163,15 @@ ifeq ($(COMP),gcc)
 	ifeq ($(ARCH),armv7)
 		ifeq ($(OS),Android)
 			CXXFLAGS += -m$(bits)
-			LDFLAGS += -m$(bits)
+			LDFLAGS += -static -m$(bits)
 		endif
 	else
 		CXXFLAGS += -m$(bits)
-		LDFLAGS += -m$(bits)
+		LDFLAGS += -static -m$(bits)
 	endif
 
 	ifneq ($(KERNEL),Darwin)
-	   LDFLAGS += -Wl,--no-as-needed
+	   LDFLAGS += -static -Wl,--no-as-needed
 	endif
 endif
 
@@ -197,7 +197,7 @@ ifeq ($(COMP),mingw)
 	endif
 
 	CXXFLAGS += -Wextra -Wshadow
-	LDFLAGS += -static
+	LDFLAGS += -static -static
 endif
 
 ifeq ($(COMP),icc)
@@ -213,18 +213,18 @@ ifeq ($(COMP),clang)
 
 	ifneq ($(KERNEL),Darwin)
 	ifneq ($(KERNEL),OpenBSD)
-		LDFLAGS += -latomic
+		LDFLAGS += -static -latomic
 	endif
 	endif
 
 	ifeq ($(ARCH),armv7)
 		ifeq ($(OS),Android)
 			CXXFLAGS += -m$(bits)
-			LDFLAGS += -m$(bits)
+			LDFLAGS += -static -m$(bits)
 		endif
 	else
 		CXXFLAGS += -m$(bits)
-		LDFLAGS += -m$(bits)
+		LDFLAGS += -static -m$(bits)
 	endif
 endif
 
@@ -243,7 +243,7 @@ endif
 
 ifeq ($(KERNEL),Darwin)
 	CXXFLAGS += -arch $(arch) -mmacosx-version-min=10.9
-	LDFLAGS += -arch $(arch) -mmacosx-version-min=10.9
+	LDFLAGS += -static -arch $(arch) -mmacosx-version-min=10.9
 endif
 
 ### Travis CI script uses COMPILER to overwrite CXX
@@ -262,7 +262,7 @@ ifneq ($(comp),mingw)
 	ifneq ($(OS),Android)
 		# Haiku has pthreads in its libroot, so only link it in on other platforms
 		ifneq ($(KERNEL),Haiku)
-			LDFLAGS += -lpthread
+			LDFLAGS += -static -lpthread
 		endif
 	endif
 endif
@@ -277,7 +277,7 @@ endif
 ### 3.2.2 Debugging with undefined behavior sanitizers
 ifneq ($(sanitize),no)
         CXXFLAGS += -g3 -fsanitize=$(sanitize) -fuse-ld=gold
-        LDFLAGS += -fsanitize=$(sanitize) -fuse-ld=gold
+        LDFLAGS += -static -fsanitize=$(sanitize) -fuse-ld=gold
 endif
 
 ### 3.3 Optimization
@@ -339,13 +339,13 @@ ifeq ($(optimize),yes)
 ifeq ($(debug), no)
 	ifeq ($(comp),$(filter $(comp),gcc clang))
 		CXXFLAGS += -flto
-		LDFLAGS += $(CXXFLAGS)
+		LDFLAGS += -static $(CXXFLAGS)
 	endif
 
 	ifeq ($(comp),mingw)
 	ifeq ($(KERNEL),Linux)
 		CXXFLAGS += -flto
-		LDFLAGS += $(CXXFLAGS)
+		LDFLAGS += -static $(CXXFLAGS)
 	endif
 	endif
 endif
@@ -355,7 +355,7 @@ endif
 ### breaks Android 4.0 and earlier.
 ifeq ($(OS), Android)
 	CXXFLAGS += -fPIE
-	LDFLAGS += -fPIE -pie
+	LDFLAGS += -static -fPIE -pie
 endif
 
 

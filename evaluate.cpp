@@ -806,9 +806,6 @@ namespace {
   template<Tracing T> template<Color Us>
   Score Evaluation<T>::space() const {
 
-    if (pos.non_pawn_material() < SpaceThreshold)
-        return SCORE_ZERO;
-
     constexpr Color Them     = (Us == WHITE ? BLACK : WHITE);
     constexpr Direction Down = -pawn_push(Us);
     constexpr Bitboard SpaceMask =
@@ -829,10 +826,16 @@ namespace {
     int weight = pos.count<ALL_PIECES>(Us) - 1;
     Score score = make_score(bonus * weight * weight / 16, 0);
 
+    // Capture the atomic features before the threshold exit
     if (T) {
         Trace::add(SPACE, Us, score);
         spaceScore[Us] = score; 
     }
+
+    // Engine logic: If non-pawn material is too low, this term is ignored in the final eval
+    if (pos.non_pawn_material() < SpaceThreshold)
+        return SCORE_ZERO;
+
     return score;
   }
 
@@ -1151,26 +1154,17 @@ std::string Eval::trace(const Position& pos) {
   print_line("Knight On Q",      get_th([](auto& a){ return a.knightOnQueen; }));
   print_line("Slider On Q",      get_th([](auto& a){ return a.sliderOnQueen; }));
 
+  print_line("Space", [&](Color c) { return ev.spaceScore[c]; });
+
   auto get_raw_mat = [&](Color c) {
-      // PieceValue[Phase][Piece]
-      // MG values are at index MG (0), EG values are at index EG (1)
       Score raw = SCORE_ZERO;
-
-      // Pawns
-      raw += make_score(PieceValue[MG][make_piece(c, PAWN)],   PieceValue[EG][make_piece(c, PAWN)])   * pos.count<PAWN>(c);
-      
-      // Knights
-      raw += make_score(PieceValue[MG][make_piece(c, KNIGHT)], PieceValue[EG][make_piece(c, KNIGHT)]) * pos.count<KNIGHT>(c);
-      
-      // Bishops
-      raw += make_score(PieceValue[MG][make_piece(c, BISHOP)], PieceValue[EG][make_piece(c, BISHOP)]) * pos.count<BISHOP>(c);
-      
-      // Rooks
-      raw += make_score(PieceValue[MG][make_piece(c, ROOK)],   PieceValue[EG][make_piece(c, ROOK)])   * pos.count<ROOK>(c);
-      
-      // Queens
-      raw += make_score(PieceValue[MG][make_piece(c, QUEEN)],  PieceValue[EG][make_piece(c, QUEEN)])  * pos.count<QUEEN>(c);
-
+      for (PieceType pt = PAWN; pt <= QUEEN; ++pt)
+      {
+          Piece pc = make_piece(c, pt);
+          // Use pieces(color, type) to get a bitboard, then count the bits
+          int count = popcount(pos.pieces(c, pt));
+          raw += make_score(PieceValue[MG][pc], PieceValue[EG][pc]) * count;
+      }
       return raw;
   };
 
